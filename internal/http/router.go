@@ -1,13 +1,25 @@
 package http
 
-import "github.com/gin-gonic/gin"
+import (
+	"gotik/internal/account"
 
-func SetRouter() *gin.Engine {
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+)
+
+func SetRouter(db *gorm.DB) *gin.Engine {
 	r := gin.Default()
 
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "pong"})
-	})
+	accountRepository := account.NewAccountRepository(db)
+	accountService := account.NewAccountService(accountRepository)
+	accountHandler := account.NewAccountHandler(accountService)
+
+	accountGroup := r.Group("/account")
+	{
+		accountGroup.POST("/register", accountHandler.CreateAccount)
+		accountGroup.POST("/login", accountHandler.Login)
+		accountGroup.POST("/findByID", accountHandler.FindByID)
+	}
 
 	return r
 }

@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("failed to auto migrate database: %v", err)
 	}
 
-	r := apphttp.SetRouter()
+	r := apphttp.SetRouter(sqlDB)
 	log.Printf("server is running on port %d", cfg.Server.Port)
 	if err := r.Run(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
 		log.Fatalf("failed to run server: %v", err)

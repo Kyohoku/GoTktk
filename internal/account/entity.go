@@ -7,3 +7,22 @@ type Account struct {
 	Password string `json:"-"`
 	Token    string `json:"-"`
 }
+
+type CreateAccountRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type FindByIDRequest struct {
+	ID uint `json:"id"`
+}
+
+type FindByIDResponse struct {
+	Username string `json:"username"`
+	ID       uint   `json:"id"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
