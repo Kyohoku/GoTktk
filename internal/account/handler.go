@@ -1,6 +1,8 @@
 package account
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+)
 
 type AccountHandler struct {
 	accountService *AccountService
@@ -60,5 +62,23 @@ func (h *AccountHandler) FindByID(c *gin.Context) {
 	c.JSON(200, FindByIDResponse{
 		ID:       account.ID,
 		Username: account.Username,
+	})
+}
+
+func (h *AccountHandler) Me(c *gin.Context) {
+	usernameValue, exists := c.Get("username")
+	if !exists {
+		c.JSON(401, gin.H{"error": "username not found"})
+		return
+	}
+
+	username, ok := usernameValue.(string)
+	if !ok {
+		c.JSON(401, gin.H{"error": "username has invalid type"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"username": username,
 	})
 }

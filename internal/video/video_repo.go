@@ -1,0 +1,49 @@
+package video
+
+import (
+	"context"
+
+	"gorm.io/gorm"
+)
+
+type VideoRepository struct {
+	db *gorm.DB
+}
+
+func NewVideoRepository(db *gorm.DB) *VideoRepository {
+	return &VideoRepository{db: db}
+}
+
+func (vr *VideoRepository) CreateVideo(ctx context.Context, video *Video) error {
+	if err := vr.db.WithContext(ctx).Create(video).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (vr *VideoRepository) DeleteVideo(ctx context.Context, id uint) error {
+	if err := vr.db.WithContext(ctx).Delete(&Video{}, id).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (vr *VideoRepository) ListByAuthorID(ctx context.Context, authorID uint) ([]Video, error) {
+	var videos []Video
+	if err := vr.db.WithContext(ctx).
+		Where("author_id = ?", authorID).
+		Order("create_time desc").
+		Offset(0).
+		Find(&videos).Error; err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+func (vr *VideoRepository) GetByID(ctx context.Context, id uint) (*Video, error) {
+	var video Video
+	if err := vr.db.WithContext(ctx).First(&video, id).Error; err != nil {
+		return (*Video)(nil), err
+	}
+	return &video, nil
+}
