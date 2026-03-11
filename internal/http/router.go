@@ -11,6 +11,7 @@ import (
 
 func SetRouter(db *gorm.DB) *gin.Engine {
 	r := gin.Default()
+	r.Static("/static", "./.run/uploads")
 
 	//account
 	accountRepository := account.NewAccountRepository(db)
@@ -44,7 +45,23 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 	protectedVideoGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
 	{
 		protectedVideoGroup.POST("/publish", videoHandler.PublishVideo)
+		protectedVideoGroup.POST("/uploadVideo", videoHandler.UploadVideo)
+		protectedVideoGroup.POST("/uploadCover", videoHandler.UploadCover)
+
 	}
 
+	//like
+	likeRepository := video.NewLikeRepository(db)
+	likeService := video.NewLikeService(likeRepository, videoRepository)
+	likeHandler := video.NewLikeHandler(likeService)
+	likeGroup := r.Group("/like")
+	protectedLikeGroup := likeGroup.Group("")
+	protectedLikeGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	{
+		protectedLikeGroup.POST("/like", likeHandler.Like)
+		protectedLikeGroup.POST("/unlike", likeHandler.Unlike)
+		protectedLikeGroup.POST("/isLiked", likeHandler.IsLiked)
+		protectedLikeGroup.POST("/listMyLikedVideos", likeHandler.ListMyLikedVideos)
+	}
 	return r
 }
