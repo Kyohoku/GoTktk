@@ -3,6 +3,7 @@ package http
 import (
 	"gotik/internal/account"
 	jwtmiddleware "gotik/internal/middleware/jwt"
+	"gotik/internal/social"
 	"gotik/internal/video"
 
 	"github.com/gin-gonic/gin"
@@ -63,5 +64,35 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 		protectedLikeGroup.POST("/isLiked", likeHandler.IsLiked)
 		protectedLikeGroup.POST("/listMyLikedVideos", likeHandler.ListMyLikedVideos)
 	}
+
+	//comment
+	commentRepository := video.NewCommentRepository(db)
+	commentService := video.NewCommentService(commentRepository, videoRepository)
+	commentHandler := video.NewCommentHandler(commentService, accountService)
+	commentGroup := r.Group("/comment")
+	{
+		commentGroup.POST("/listAll", commentHandler.GetAllComments)
+	}
+	protectedCommentGroup := commentGroup.Group("")
+	protectedCommentGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	{
+		protectedCommentGroup.POST("/publish", commentHandler.PublishComment)
+		protectedCommentGroup.POST("/delete", commentHandler.DeleteComment)
+	}
+
+	//social
+	socialRepository := social.NewSocialRepository(db)
+	socialService := social.NewSocialService(socialRepository, accountRepository)
+	socialHandler := social.NewSocialHandler(socialService)
+	socialGroup := r.Group("/social")
+	protectedSocialGroup := socialGroup.Group("")
+	protectedSocialGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	{
+		protectedSocialGroup.POST("/follow", socialHandler.Follow)
+		protectedSocialGroup.POST("/unfollow", socialHandler.Unfollow)
+		protectedSocialGroup.POST("/getAllFollowers", socialHandler.GetAllFollowers)
+		protectedSocialGroup.POST("/getAllVloggers", socialHandler.GetAllVloggers)
+	}
+
 	return r
 }
