@@ -2,6 +2,7 @@ package http
 
 import (
 	"gotik/internal/account"
+	"gotik/internal/feed"
 	jwtmiddleware "gotik/internal/middleware/jwt"
 	"gotik/internal/social"
 	"gotik/internal/video"
@@ -92,6 +93,16 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 		protectedSocialGroup.POST("/unfollow", socialHandler.Unfollow)
 		protectedSocialGroup.POST("/getAllFollowers", socialHandler.GetAllFollowers)
 		protectedSocialGroup.POST("/getAllVloggers", socialHandler.GetAllVloggers)
+	}
+
+	//feed
+	feedRepository := feed.NewFeedRepository(db)
+	feedService := feed.NewFeedService(feedRepository, likeRepository)
+	feedHandler := feed.NewFeedHandler(feedService)
+	feedGroup := r.Group("/feed")
+	{
+		feedGroup.POST("/listLatest", feedHandler.ListLatest)
+		feedGroup.POST("/listLikesCount", feedHandler.ListLikesCount)
 	}
 
 	return r

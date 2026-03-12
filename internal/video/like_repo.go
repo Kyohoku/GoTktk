@@ -59,3 +59,25 @@ func (r *LikeRepository) ListLikedVideos(ctx context.Context, accountID uint) ([
 	}
 	return videos, nil
 }
+
+// 批量查看是否点赞
+func (r *LikeRepository) BatchGetLiked(ctx context.Context, videoIDs []uint, accountID uint) (map[uint]bool, error) {
+	likeMap := make(map[uint]bool)
+	if len(videoIDs) == 0 {
+		return likeMap, nil
+	}
+	if accountID == 0 {
+		return likeMap, nil
+	}
+	var likes []Like
+	err := r.db.WithContext(ctx).Model(&Like{}).
+		Where("video_id IN ? AND account_id = ?", videoIDs, accountID).
+		Find(&likes).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, like := range likes {
+		likeMap[like.VideoID] = true
+	}
+	return likeMap, nil
+}
