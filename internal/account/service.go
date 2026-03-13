@@ -2,7 +2,11 @@ package account
 
 import (
 	"context"
+	"fmt"
 	"gotik/internal/auth"
+	rediscache "gotik/internal/middleware/redis"
+	"log"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -11,10 +15,11 @@ import (
 
 type AccountService struct {
 	accountRepository *AccountRepository
+	cache             *rediscache.Client
 }
 
-func NewAccountService(accountRepository *AccountRepository) *AccountService {
-	return &AccountService{accountRepository: accountRepository}
+func NewAccountService(accountRepository *AccountRepository, cache *rediscache.Client) *AccountService {
+	return &AccountService{accountRepository: accountRepository, cache: cache}
 }
 
 func (as *AccountService) CreateAccount(ctx context.Context, account *Account) error {
@@ -49,6 +54,17 @@ func (as *AccountService) Login(ctx context.Context, username, password string) 
 
 	if err := as.accountRepository.Login(ctx, account.ID, token); err != nil {
 		return "", err
+	}
+
+	if as.cache != nil { //将获得的 token 写入 redis
+		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		if err := as.cache.SetBytes(cacheCtx, fmt.Sprintf("account:%d", account.ID), []byte(token), 24*time.Hour); err != nil {
+			log.Printf("failed to set cache: %v", err)
+		} else {
+			//log.Printf("token cached: key=%s token=%s", account.ID, token)  //test 查看当前token是否成功写入redis
+		}
 	}
 
 	return token, nil

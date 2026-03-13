@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"strconv"
+	"time"
 
 	"gotik/internal/config"
 	"gotik/internal/db"
 	apphttp "gotik/internal/http"
+	rediscache "gotik/internal/middleware/redis"
 )
 
 func main() {
@@ -15,6 +18,7 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	//数据库连接
 	sqlDB, err := db.NewDB(cfg.Database)
 	if err != nil {
 		log.Fatalf("failed to connect database: %v", err)
@@ -29,7 +33,25 @@ func main() {
 		log.Fatalf("failed to auto migrate database: %v", err)
 	}
 
-	r := apphttp.SetRouter(sqlDB)
+	// 连接 Redis
+	cache, err := rediscache.NewFromEnv(&cfg.Redis)
+	if err != nil {
+		log.Printf("Redis config error (cache disabled): %v", err)
+		cache = nil
+	} else {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		if err := cache.Ping(pingCtx); err != nil {
+			log.Printf("Redis not available (cache disabled): %v", err)
+			_ = cache.Close()
+			cache = nil
+		} else {
+			defer cache.Close()
+			log.Printf("Redis connected (cache enabled)")
+		}
+	}
+
+	r := apphttp.SetRouter(sqlDB, cache)
 	log.Printf("server is running on port %d", cfg.Server.Port)
 	if err := r.Run(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
 		log.Fatalf("failed to run server: %v", err)

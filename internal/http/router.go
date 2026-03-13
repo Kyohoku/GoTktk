@@ -4,6 +4,7 @@ import (
 	"gotik/internal/account"
 	"gotik/internal/feed"
 	jwtmiddleware "gotik/internal/middleware/jwt"
+	rediscache "gotik/internal/middleware/redis"
 	"gotik/internal/social"
 	"gotik/internal/video"
 
@@ -11,13 +12,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetRouter(db *gorm.DB) *gin.Engine {
+func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 	r := gin.Default()
 	r.Static("/static", "./.run/uploads")
 
 	//account
 	accountRepository := account.NewAccountRepository(db)
-	accountService := account.NewAccountService(accountRepository)
+	accountService := account.NewAccountService(accountRepository, cache)
 	accountHandler := account.NewAccountHandler(accountService)
 
 	accountGroup := r.Group("/account")
@@ -28,7 +29,7 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 	}
 
 	protectedAccountGroup := accountGroup.Group("")
-	protectedAccountGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	protectedAccountGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedAccountGroup.GET("/me", accountHandler.Me)
 	}
@@ -44,7 +45,7 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 	}
 
 	protectedVideoGroup := videoGroup.Group("")
-	protectedVideoGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	protectedVideoGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedVideoGroup.POST("/publish", videoHandler.PublishVideo)
 		protectedVideoGroup.POST("/uploadVideo", videoHandler.UploadVideo)
@@ -58,7 +59,7 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 	likeHandler := video.NewLikeHandler(likeService)
 	likeGroup := r.Group("/like")
 	protectedLikeGroup := likeGroup.Group("")
-	protectedLikeGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	protectedLikeGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedLikeGroup.POST("/like", likeHandler.Like)
 		protectedLikeGroup.POST("/unlike", likeHandler.Unlike)
@@ -75,7 +76,7 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 		commentGroup.POST("/listAll", commentHandler.GetAllComments)
 	}
 	protectedCommentGroup := commentGroup.Group("")
-	protectedCommentGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	protectedCommentGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedCommentGroup.POST("/publish", commentHandler.PublishComment)
 		protectedCommentGroup.POST("/delete", commentHandler.DeleteComment)
@@ -87,7 +88,7 @@ func SetRouter(db *gorm.DB) *gin.Engine {
 	socialHandler := social.NewSocialHandler(socialService)
 	socialGroup := r.Group("/social")
 	protectedSocialGroup := socialGroup.Group("")
-	protectedSocialGroup.Use(jwtmiddleware.JWTAuth(accountRepository))
+	protectedSocialGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedSocialGroup.POST("/follow", socialHandler.Follow)
 		protectedSocialGroup.POST("/unfollow", socialHandler.Unfollow)

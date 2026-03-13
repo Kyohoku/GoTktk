@@ -1,17 +1,22 @@
 package jwt
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"gotik/internal/account"
 	"gotik/internal/auth"
+	rediscache "gotik/internal/middleware/redis"
 
 	"github.com/gin-gonic/gin"
 )
 
-func JWTAuth(accountRepo *account.AccountRepository) gin.HandlerFunc {
+func JWTAuth(accountRepo *account.AccountRepository, cache *rediscache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -33,16 +38,7 @@ func JWTAuth(accountRepo *account.AccountRepository) gin.HandlerFunc {
 			return
 		}
 
-		accountInfo, err := accountRepo.FindByID(c.Request.Context(), claims.AccountID)
-		if err != nil || accountInfo.Token == "" || accountInfo.Token != tokenString {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked"})
-			return
-		}
-
-		// token is legal ,so put it into context ，后续不需要重复解析token
-		c.Set("accountID", claims.AccountID)
-		c.Set("username", claims.Username)
-		c.Next()
+		check(c, claims, tokenString, accountRepo, cache)
 	}
 }
 
@@ -72,4 +68,48 @@ func GetUsername(c *gin.Context) (string, error) {
 	}
 
 	return username, nil
+}
+
+func check(c *gin.Context, claims *auth.Claims, tokenString string, accountRepo *account.AccountRepository, cache *rediscache.Client) {
+	key := fmt.Sprintf("account:%d", claims.AccountID) //key is account id
+
+	// 先查 Redis
+	if cache != nil {
+		cacheCtx, cancel := context.WithTimeout(c.Request.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		b, err := cache.GetBytes(cacheCtx, key)
+		if err == nil {
+			log.Printf("redis hit: key=%s", key)
+			if string(b) != tokenString {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked"})
+				return
+			}
+			c.Set("accountID", claims.AccountID)
+			c.Set("username", claims.Username)
+			c.Next()
+			return
+		}
+	}
+
+	// Redis 故障/未启用：查 DB 兜底
+	accountInfo, err := accountRepo.FindByID(c.Request.Context(), claims.AccountID)
+	if err != nil || accountInfo.Token == "" || accountInfo.Token != tokenString {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked"})
+		return
+	}
+
+	if cache != nil { //自愈
+		cacheCtx, cancel := context.WithTimeout(c.Request.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		if err := cache.SetBytes(cacheCtx, key, []byte(tokenString), 24*time.Hour); err != nil {
+			log.Printf("failed to set cache: %v", err)
+		}
+	}
+
+	c.Set("accountID", claims.AccountID)
+	c.Set("username", claims.Username)
+	c.Next()
+
 }
