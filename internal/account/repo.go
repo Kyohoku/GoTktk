@@ -45,3 +45,11 @@ func (ar *AccountRepository) Login(ctx context.Context, id uint, token string) e
 	}
 	return nil
 }
+
+// clear the token in db
+func (ar *AccountRepository) Logout(ctx context.Context, id uint) error {
+	if err := ar.db.WithContext(ctx).Model(&Account{}).Where("id = ?", id).Update("token", "").Error; err != nil {
+		return err
+	}
+	return nil
+}

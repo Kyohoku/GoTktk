@@ -85,3 +85,22 @@ func (as *AccountService) FindByUsername(ctx context.Context, username string) (
 		return account, nil
 	}
 }
+
+func (as *AccountService) Logout(ctx context.Context, accountID uint) error {
+	account, err := as.FindByID(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if account.Token == "" {
+		return nil
+	}
+	if as.cache != nil { //delete the token in cache
+		cacheCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		if err := as.cache.Del(cacheCtx, fmt.Sprintf("account:%d", account.ID)); err != nil {
+			log.Printf("failed to del cache: %v", err)
+		}
+	}
+	return as.accountRepository.Logout(ctx, account.ID)
+}

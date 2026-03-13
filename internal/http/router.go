@@ -32,6 +32,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 	protectedAccountGroup.Use(jwtmiddleware.JWTAuth(accountRepository, cache))
 	{
 		protectedAccountGroup.GET("/me", accountHandler.Me)
+		protectedAccountGroup.POST("/logout", accountHandler.Logout)
 	}
 
 	//video
