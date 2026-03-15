@@ -99,7 +99,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 
 	//feed
 	feedRepository := feed.NewFeedRepository(db)
-	feedService := feed.NewFeedService(feedRepository, likeRepository)
+	feedService := feed.NewFeedService(feedRepository, likeRepository, cache)
 	feedHandler := feed.NewFeedHandler(feedService)
 	feedGroup := r.Group("/feed")
 	{
