@@ -37,7 +37,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 
 	//video
 	videoRepository := video.NewVideoRepository(db)
-	videoService := video.NewVideoService(videoRepository)
+	videoService := video.NewVideoService(videoRepository, cache)
 	videoHandler := video.NewVideoHandler(videoService, accountService)
 	videoGroup := r.Group("/video")
 	{
