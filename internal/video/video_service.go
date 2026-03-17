@@ -91,17 +91,69 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		_ = vs.cache.SetBytes(ctx, cacheKey, b, vs.cacheTTL)
 	}
 
-	if video, ok := getCached(); ok {
-		log.Printf("video detail cache hit: key=%d", video.ID)
-		return video, nil
-	}
+	if vs.cache != nil { //redis 运行中
+		if v, ok := getCached(); ok { //缓存命中
+			log.Printf("video detail cache hit: key=%s", cacheKey)
+			return v, nil
+		}
 
-	//缓存 miss 失效的兜底
+		log.Printf("video detail cache miss: key=%s", cacheKey)
+
+		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		b, err := vs.cache.GetBytes(opCtx, cacheKey)
+		cancel()
+		if err == nil {
+			var cached Video
+			if err := json.Unmarshal(b, &cached); err == nil {
+				return &cached, nil
+			}
+		} else if rediscache.IsMiss(err) { //缓存 miss
+			lockKey := "lock:" + cacheKey //lock key 设计
+
+			lockCtx, lockCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 2*time.Second) //锁2秒有效
+			lockCancel()
+
+			if lockErr == nil && locked {
+				//defer 保证锁可以被释放
+				defer func() { _ = vs.cache.Unlock(context.Background(), lockKey, token) }()
+
+				log.Printf("video detail lock acquired: lockKey=%s token_prefix=%s", lockKey, token[:8])
+
+				if v, ok := getCached(); ok { //拿到锁后再先查一次缓存
+					log.Printf("video detail cache filled before db fallback: key=%s", cacheKey) //拿到锁后发现缓存已经被填写了
+
+					return v, nil
+				}
+
+				video, err := vs.repo.GetByID(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				setCached(video)
+				return video, nil
+			}
+
+			// 没拿到锁：等待别人回填缓存
+			for i := 0; i < 5; i++ { //等待100ms
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(20 * time.Millisecond):
+				}
+				if v, ok := getCached(); ok {
+					return v, nil
+				}
+			}
+		}
+	}
+	//查数据库兜底
 	video, err := vs.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-
-	setCached(video)
+	if vs.cache != nil {
+		setCached(video) //回填 redis
+	}
 	return video, nil
 }
