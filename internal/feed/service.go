@@ -48,7 +48,7 @@ func (f *FeedService) ListLatest(ctx context.Context, limit int, latestBefore ti
 	}
 
 	var cacheKey string
-	if viewerAccountID == 0 && f.cache != nil {
+	if viewerAccountID == 0 && f.cache != nil { //匿名流
 		before := int64(0)
 		if !latestBefore.IsZero() {
 			before = latestBefore.Unix()
@@ -62,6 +62,53 @@ func (f *FeedService) ListLatest(ctx context.Context, limit int, latestBefore ti
 			if err := json.Unmarshal(b, &cached); err == nil {
 				return cached, nil
 			}
+		} else if rediscache.IsMiss(err) { //未命中
+			lockKey := "lock:" + cacheKey //锁的 key
+			log.Printf("feed latest cache miss: key=%s", cacheKey)
+
+			lockCtx, lockCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+			token, locked, lockErr := f.cache.Lock(lockCtx, lockKey, 1*time.Second)
+			lockCancel()
+			if lockErr == nil && locked { // get lock
+				log.Printf("feed latest lock acquired: lockKey=%s", lockKey)
+
+				defer func() { _ = f.cache.Unlock(context.Background(), lockKey, token) }()
+
+				if b, err := f.cache.GetBytes(ctx, cacheKey); err == nil { //check cache again
+					var cached ListLatestResponse
+					if err := json.Unmarshal(b, &cached); err == nil {
+						return cached, nil
+					}
+				}
+
+				//database
+				resp, err := doListLatestFromDB()
+				if err != nil {
+					return ListLatestResponse{}, err
+				}
+				if b, err := json.Marshal(resp); err == nil {
+					_ = f.cache.SetBytes(ctx, cacheKey, b, f.cacheTTL)
+				}
+				return resp, nil
+
+			}
+
+			// no lock
+			for i := 0; i < 5; i++ {
+				select {
+				case <-ctx.Done():
+					return ListLatestResponse{}, ctx.Err()
+				case <-time.After(20 * time.Millisecond):
+				}
+
+				if b, err := f.cache.GetBytes(ctx, cacheKey); err == nil {
+					var cached ListLatestResponse
+					if err := json.Unmarshal(b, &cached); err == nil {
+						return cached, nil
+					}
+				}
+			}
+
 		}
 	}
 
