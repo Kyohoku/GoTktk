@@ -56,7 +56,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 
 	//like
 	likeRepository := video.NewLikeRepository(db)
-	likeService := video.NewLikeService(likeRepository, videoRepository)
+	likeService := video.NewLikeService(likeRepository, videoRepository, cache)
 	likeHandler := video.NewLikeHandler(likeService)
 	likeGroup := r.Group("/like")
 	protectedLikeGroup := likeGroup.Group("")
@@ -70,7 +70,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 
 	//comment
 	commentRepository := video.NewCommentRepository(db)
-	commentService := video.NewCommentService(commentRepository, videoRepository)
+	commentService := video.NewCommentService(commentRepository, videoRepository, cache)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
 	commentGroup := r.Group("/comment")
 	{
@@ -105,6 +105,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
 	{
 		feedGroup.POST("/listLatest", feedHandler.ListLatest)
 		feedGroup.POST("/listLikesCount", feedHandler.ListLikesCount)
+		feedGroup.POST("/listByPopularity", feedHandler.ListByPopularity)
 	}
 
 	return r

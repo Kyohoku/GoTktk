@@ -87,3 +87,33 @@ func (f *FeedHandler) ListLikesCount(c *gin.Context) {
 	}
 	c.JSON(200, feedItems)
 }
+
+func (f *FeedHandler) ListByPopularity(c *gin.Context) {
+	var req struct {
+		Limit int `json:"limit"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Limit <= 0 || req.Limit > 50 {
+		req.Limit = 10
+	}
+
+	viewerAccountID, err := jwt.GetAccountID(c)
+	if err != nil {
+		viewerAccountID = 0
+	}
+
+	items, err := f.service.ListByPopularity(c.Request.Context(), req.Limit, viewerAccountID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"video_list": items,
+	})
+}

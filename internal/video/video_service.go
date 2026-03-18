@@ -157,3 +157,20 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 	}
 	return video, nil
 }
+
+//func (vs *VideoService) UpdatePopularity(ctx context.Context, id uint, change int64) error {
+//	//先更新数据库
+//	if err := vs.repo.UpdatePopularity(ctx, id, change); err != nil {
+//		return err
+//	}
+//
+//	if vs.cache != nil {
+//		//详情缓存 key 失效
+//		_ = vs.cache.Del(context.Background(), fmt.Sprintf("video:detail:id=%d", id))
+//
+//		member := strconv.FormatUint(uint64(id), 10)
+//		_ = vs.cache.ZincrBy(ctx, "hot:video", member, float64(change))
+//	}
+//
+//	return nil
+//}

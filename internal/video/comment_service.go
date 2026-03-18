@@ -3,16 +3,18 @@ package video
 import (
 	"context"
 	"errors"
+	rediscache "gotik/internal/middleware/redis"
 	"strings"
 )
 
 type CommentService struct {
 	repo            *CommentRepository
 	VideoRepository *VideoRepository
+	cache           *rediscache.Client
 }
 
-func NewCommentService(repo *CommentRepository, videoRepository *VideoRepository) *CommentService {
-	return &CommentService{repo: repo, VideoRepository: videoRepository}
+func NewCommentService(repo *CommentRepository, videoRepository *VideoRepository, cache *rediscache.Client) *CommentService {
+	return &CommentService{repo: repo, VideoRepository: videoRepository, cache: cache}
 }
 
 func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
@@ -41,6 +43,12 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 	if err := s.repo.CreateComment(ctx, comment); err != nil {
 		return err
 	}
+
+	if err := s.VideoRepository.UpdatePopularity(ctx, comment.VideoID, 2); err != nil {
+		return err
+	}
+
+	UpdatePopularityCache(ctx, s.cache, comment.VideoID, 2)
 
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	rediscache "gotik/internal/middleware/redis"
 	"gotik/internal/video"
 	"log"
+	"strconv"
 	"time"
 )
 
@@ -177,4 +178,49 @@ func (f *FeedService) buildFeedVideos(ctx context.Context, videos []*video.Video
 		})
 	}
 	return feedVideos, nil
+}
+
+// 按热度推送
+func (f *FeedService) ListByPopularity(ctx context.Context, limit int, viewerAccountID uint) ([]FeedVideoItem, error) {
+	if f.cache == nil {
+		return []FeedVideoItem{}, nil
+	}
+
+	members, err := f.cache.ZRevRange(ctx, "hot:video", 0, int64(limit-1))
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return []FeedVideoItem{}, nil
+	}
+
+	ids := make([]uint, 0, len(members))
+	for _, m := range members {
+		u, err := strconv.ParseUint(m, 10, 64)
+		if err == nil && u > 0 {
+			ids = append(ids, uint(u))
+		}
+	}
+	if len(ids) == 0 {
+		return []FeedVideoItem{}, nil
+	}
+
+	videos, err := f.repo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	byID := make(map[uint]*video.Video, len(videos))
+	for _, v := range videos {
+		byID[v.ID] = v
+	}
+
+	ordered := make([]*video.Video, 0, len(ids))
+	for _, id := range ids {
+		if v := byID[id]; v != nil {
+			ordered = append(ordered, v)
+		}
+	}
+
+	return f.buildFeedVideos(ctx, ordered, viewerAccountID)
 }

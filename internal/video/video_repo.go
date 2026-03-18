@@ -69,3 +69,12 @@ func (vr *VideoRepository) ChangeLikesCount(ctx context.Context, id uint, change
 	}
 	return nil
 }
+
+func (vr *VideoRepository) UpdatePopularity(ctx context.Context, id uint, change int64) error {
+	if err := vr.db.WithContext(ctx).Model(&Video{}).
+		Where("id = ?", id).
+		Update("popularity", gorm.Expr("popularity + ?", change)).Error; err != nil {
+		return err
+	}
+	return nil
+}

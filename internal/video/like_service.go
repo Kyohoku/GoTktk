@@ -3,16 +3,18 @@ package video
 import (
 	"context"
 	"errors"
+	rediscache "gotik/internal/middleware/redis"
 	"time"
 )
 
 type LikeService struct {
 	repo      *LikeRepository
 	VideoRepo *VideoRepository
+	cache     *rediscache.Client
 }
 
-func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository) *LikeService {
-	return &LikeService{repo: repo, VideoRepo: videoRepo}
+func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *rediscache.Client) *LikeService {
+	return &LikeService{repo: repo, VideoRepo: videoRepo, cache: cache}
 }
 
 func (s *LikeService) Like(ctx context.Context, like *Like) error {
@@ -48,6 +50,13 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 	if err := s.VideoRepo.ChangeLikesCount(ctx, like.VideoID, 1); err != nil {
 		return err
 	}
+
+	if err := s.VideoRepo.UpdatePopularity(ctx, like.VideoID, 1); err != nil {
+		return err
+	}
+
+	//更新热榜
+	UpdatePopularityCache(ctx, s.cache, like.VideoID, 1)
 
 	return nil
 }
@@ -87,6 +96,12 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 	if err := s.VideoRepo.ChangeLikesCount(ctx, like.VideoID, -1); err != nil {
 		return err
 	}
+
+	if err := s.VideoRepo.UpdatePopularity(ctx, like.VideoID, -1); err != nil {
+		return err
+	}
+
+	UpdatePopularityCache(ctx, s.cache, like.VideoID, -1)
 
 	return nil
 }
