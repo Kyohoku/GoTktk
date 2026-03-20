@@ -181,46 +181,128 @@ func (f *FeedService) buildFeedVideos(ctx context.Context, videos []*video.Video
 }
 
 // 按热度推送
-func (f *FeedService) ListByPopularity(ctx context.Context, limit int, viewerAccountID uint) ([]FeedVideoItem, error) {
-	if f.cache == nil {
-		return []FeedVideoItem{}, nil
-	}
+func (f *FeedService) ListByPopularity(
+	ctx context.Context,
+	limit int,
+	reqAsOf int64,
+	offset int,
+	viewerAccountID uint,
+	latestPopularity int64,
+	latestBefore time.Time,
+	latestIDBefore uint,
+) (ListByPopularityResponse, error) {
+	if f.cache != nil {
+		asOf := time.Now().UTC().Truncate(time.Minute)
+		if reqAsOf > 0 {
+			asOf = time.Unix(reqAsOf, 0).UTC().Truncate(time.Minute)
+		}
 
-	members, err := f.cache.ZRevRange(ctx, "hot:video", 0, int64(limit-1))
-	if err != nil {
-		return nil, err
-	}
-	if len(members) == 0 {
-		return []FeedVideoItem{}, nil
-	}
+		const win = 60
+		keys := make([]string, 0, win)
+		for i := 0; i < win; i++ {
+			keys = append(keys, "hot:video:1m:"+asOf.Add(-time.Duration(i)*time.Minute).Format("200601021504"))
+		}
 
-	ids := make([]uint, 0, len(members))
-	for _, m := range members {
-		u, err := strconv.ParseUint(m, 10, 64)
-		if err == nil && u > 0 {
-			ids = append(ids, uint(u))
+		dest := "hot:video:merge:1m:" + asOf.Format("200601021504")
+
+		exists, err := f.cache.Exists(ctx, dest)
+		if err == nil && !exists {
+			_ = f.cache.ZUnionStore(ctx, dest, keys, "SUM")
+			_ = f.cache.Expire(ctx, dest, 2*time.Minute)
+		}
+
+		start := int64(offset)
+		stop := start + int64(limit) - 1
+
+		members, err := f.cache.ZRevRange(ctx, dest, start, stop)
+		if err == nil {
+			log.Printf("hot ranking page: dest=%s offset=%d limit=%d members=%v", dest, offset, limit, members)
+			if len(members) == 0 {
+				return ListByPopularityResponse{
+					VideoList:  []FeedVideoItem{},
+					AsOf:       asOf.Unix(),
+					NextOffset: offset,
+					HasMore:    false,
+				}, nil
+			}
+
+			ids := make([]uint, 0, len(members))
+			for _, m := range members {
+				u, err := strconv.ParseUint(m, 10, 64)
+				if err == nil && u > 0 {
+					ids = append(ids, uint(u))
+				}
+			}
+
+			videos, err := f.repo.GetByIDs(ctx, ids)
+			if err == nil {
+				byID := make(map[uint]*video.Video, len(videos))
+				for _, v := range videos {
+					byID[v.ID] = v
+				}
+
+				ordered := make([]*video.Video, 0, len(ids))
+				for _, id := range ids {
+					if v := byID[id]; v != nil {
+						ordered = append(ordered, v)
+					}
+				}
+
+				items, err := f.buildFeedVideos(ctx, ordered, viewerAccountID)
+				if err != nil {
+					return ListByPopularityResponse{}, err
+				}
+
+				resp := ListByPopularityResponse{
+					VideoList:  items,
+					AsOf:       asOf.Unix(),
+					NextOffset: offset + len(items),
+					HasMore:    len(items) == limit,
+				}
+
+				if len(ordered) > 0 {
+					last := ordered[len(ordered)-1]
+					nextPopularity := last.Popularity
+					nextBefore := last.CreateTime
+					nextID := last.ID
+					resp.NextLatestPopularity = &nextPopularity
+					resp.NextLatestBefore = &nextBefore
+					resp.NextLatestIDBefore = &nextID
+				}
+
+				return resp, nil
+			}
 		}
 	}
-	if len(ids) == 0 {
-		return []FeedVideoItem{}, nil
-	}
 
-	videos, err := f.repo.GetByIDs(ctx, ids)
+	//缓存不可用
+
+	videos, err := f.repo.ListByPopularity(ctx, limit, latestPopularity, latestBefore, latestIDBefore)
 	if err != nil {
-		return nil, err
+		return ListByPopularityResponse{}, err
 	}
 
-	byID := make(map[uint]*video.Video, len(videos))
-	for _, v := range videos {
-		byID[v.ID] = v
+	items, err := f.buildFeedVideos(ctx, videos, viewerAccountID)
+	if err != nil {
+		return ListByPopularityResponse{}, err
 	}
 
-	ordered := make([]*video.Video, 0, len(ids))
-	for _, id := range ids {
-		if v := byID[id]; v != nil {
-			ordered = append(ordered, v)
-		}
+	resp := ListByPopularityResponse{
+		VideoList:  items,
+		AsOf:       0,
+		NextOffset: 0,
+		HasMore:    len(items) == limit,
 	}
 
-	return f.buildFeedVideos(ctx, ordered, viewerAccountID)
+	if len(videos) > 0 {
+		last := videos[len(videos)-1]
+		nextPopularity := last.Popularity
+		nextBefore := last.CreateTime
+		nextID := last.ID
+		resp.NextLatestPopularity = &nextPopularity
+		resp.NextLatestBefore = &nextBefore
+		resp.NextLatestIDBefore = &nextID
+	}
+
+	return resp, nil
 }
