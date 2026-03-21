@@ -9,6 +9,7 @@ import (
 	"gotik/internal/config"
 	"gotik/internal/db"
 	apphttp "gotik/internal/http"
+	rabbitmq "gotik/internal/middleware/rabbitmq"
 	rediscache "gotik/internal/middleware/redis"
 )
 
@@ -51,7 +52,18 @@ func main() {
 		}
 	}
 
-	r := apphttp.SetRouter(sqlDB, cache)
+	// 连接 RabbitMQ (可选，用于消息队列)
+	rmq, err := rabbitmq.NewRabbitMQ(&cfg.RabbitMQ)
+	if err != nil {
+		log.Printf("RabbitMQ config error (disabled): %v", err)
+		rmq = nil
+	} else {
+		defer rmq.Close()
+		log.Printf("RabbitMQ connected")
+	}
+
+	//设置路由
+	r := apphttp.SetRouter(sqlDB, cache, rmq)
 	log.Printf("server is running on port %d", cfg.Server.Port)
 	if err := r.Run(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
 		log.Fatalf("failed to run server: %v", err)

@@ -4,6 +4,7 @@ import (
 	"gotik/internal/account"
 	"gotik/internal/feed"
 	jwtmiddleware "gotik/internal/middleware/jwt"
+	"gotik/internal/middleware/rabbitmq"
 	rediscache "gotik/internal/middleware/redis"
 	"gotik/internal/social"
 	"gotik/internal/video"
@@ -12,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetRouter(db *gorm.DB, cache *rediscache.Client) *gin.Engine {
+func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *gin.Engine {
 	r := gin.Default()
 	r.Static("/static", "./.run/uploads")
 
