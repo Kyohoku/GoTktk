@@ -8,6 +8,7 @@ import (
 	rediscache "gotik/internal/middleware/redis"
 	"gotik/internal/social"
 	"gotik/internal/video"
+	"log"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -56,8 +57,13 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *g
 	}
 
 	//like
+	likeMQ, err := rabbitmq.NewLikeMQ(rmq)
+	if err != nil {
+		log.Printf("LikeMQ init failed (mq disabled): %v", err)
+		likeMQ = nil
+	}
 	likeRepository := video.NewLikeRepository(db)
-	likeService := video.NewLikeService(likeRepository, videoRepository, cache)
+	likeService := video.NewLikeService(likeRepository, videoRepository, cache, likeMQ)
 	likeHandler := video.NewLikeHandler(likeService)
 	likeGroup := r.Group("/like")
 	protectedLikeGroup := likeGroup.Group("")

@@ -2,7 +2,9 @@ package video
 
 import (
 	"context"
+	"errors"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -80,4 +82,19 @@ func (r *LikeRepository) BatchGetLiked(ctx context.Context, videoIDs []uint, acc
 		likeMap[like.VideoID] = true
 	}
 	return likeMap, nil
+}
+
+func (r *LikeRepository) LikeIgnoreDuplicate(ctx context.Context, like *Like) (created bool, err error) {
+	if like == nil || like.VideoID == 0 || like.AccountID == 0 {
+		return false, nil
+	}
+	err = r.db.WithContext(ctx).Create(like).Error
+	if err == nil {
+		return true, nil
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return false, nil
+	}
+	return false, err
 }
