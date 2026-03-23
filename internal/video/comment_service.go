@@ -95,6 +95,7 @@ func (s *CommentService) Delete(ctx context.Context, commentID uint, accountID u
 
 	if s.commentMQ != nil { //异步化
 		if err := s.commentMQ.Delete(ctx, commentID); err == nil {
+			log.Printf("delete comment request enqueued to rabbitmq:comment_id=%d", commentID)
 			return nil
 		}
 	}

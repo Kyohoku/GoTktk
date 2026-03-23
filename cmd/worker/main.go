@@ -5,6 +5,7 @@ import (
 	"gotik/internal/config"
 	"gotik/internal/db"
 	rediscache "gotik/internal/middleware/redis"
+	"gotik/internal/social"
 	"gotik/internal/video"
 	"gotik/internal/worker"
 	"log"
@@ -25,6 +26,10 @@ const (
 	commentExchange   = "comment.events"
 	commentQueue      = "comment.events"
 	commentBindingKey = "comment.*"
+
+	socialExchange   = "social.events"
+	socialQueue      = "social.events"
+	socialBindingKey = "social.*"
 )
 
 func main() {
@@ -80,6 +85,10 @@ func main() {
 	if err := declareCommentTopology(ch); err != nil {
 		log.Fatalf("Failed to declare comment topology: %v", err)
 	}
+	// 声明 Social 交换机和队列
+	if err := declareSocialTopology(ch); err != nil {
+		log.Fatalf("Failed to declare social topology: %v", err)
+	}
 
 	if err := ch.Qos(50, 0, false); err != nil {
 		log.Fatalf("Failed to set qos: %v", err)
@@ -90,6 +99,9 @@ func main() {
 	likeRepo := video.NewLikeRepository(sqlDB)
 	likeWorker := worker.NewLikeWorker(ch, likeRepo, videoRepo, likeQueue)
 	commentWorker := worker.NewCommentWorker(ch, commentRepo, videoRepo, commentQueue)
+	repo := social.NewSocialRepository(sqlDB)
+	socialWorker := worker.NewSocialWorker(ch, repo, socialQueue)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -99,6 +111,8 @@ func main() {
 	go func() { errCh <- likeWorker.Run(ctx) }()
 	log.Printf("Worker started, consuming queue=%s", commentQueue)
 	go func() { errCh <- commentWorker.Run(ctx) }()
+	log.Printf("Worker started, consuming queue=%s", socialQueue)
+	go func() { errCh <- socialWorker.Run(ctx) }()
 	err = <-errCh
 	if err != nil && err != context.Canceled {
 		log.Fatalf("Worker stopped: %v", err)
@@ -173,4 +187,41 @@ func declareCommentTopology(ch *amqp.Channel) error {
 		false,
 		nil,
 	)
+}
+
+func declareSocialTopology(ch *amqp.Channel) error {
+	if err := ch.ExchangeDeclare(
+		socialExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	q, err := ch.QueueDeclare(
+		socialQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	if err := ch.QueueBind(
+		q.Name,
+		socialBindingKey,
+		socialExchange,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	return nil
 }

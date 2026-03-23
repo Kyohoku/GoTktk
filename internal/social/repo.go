@@ -2,8 +2,10 @@ package social
 
 import (
 	"context"
+	"errors"
 	"gotik/internal/account"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -17,6 +19,25 @@ func NewSocialRepository(db *gorm.DB) *Repository {
 
 func (r *Repository) Follow(ctx context.Context, relation *Social) error {
 	return r.db.WithContext(ctx).Create(relation).Error
+}
+
+// FollowIgnoreDuplicate 函数，用于保证异步进行关注时的幂等性
+func (r *Repository) FollowIgnoreDuplicate(ctx context.Context, relation *Social) (created bool, err error) {
+	if relation == nil || relation.FollowerID == 0 || relation.VloggerID == 0 {
+		return false, nil
+	}
+
+	err = r.db.WithContext(ctx).Create(relation).Error
+	if err == nil {
+		return true, nil
+	}
+
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return false, nil
+	}
+
+	return false, err
 }
 
 func (r *Repository) Unfollow(ctx context.Context, relation *Social) error {

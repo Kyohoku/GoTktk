@@ -4,17 +4,21 @@ import (
 	"context"
 	"errors"
 	"gotik/internal/account"
+	"gotik/internal/middleware/rabbitmq"
+	"log"
 )
 
 type Service struct {
 	repository        *Repository
 	accountRepository *account.AccountRepository
+	socialMQ          *rabbitmq.SocialMQ
 }
 
-func NewSocialService(repository *Repository, accountRepository *account.AccountRepository) *Service {
+func NewSocialService(repository *Repository, accountRepository *account.AccountRepository, socialMQ *rabbitmq.SocialMQ) *Service {
 	return &Service{
 		repository:        repository,
 		accountRepository: accountRepository,
+		socialMQ:          socialMQ,
 	}
 }
 
@@ -38,6 +42,18 @@ func (s *Service) Follow(ctx context.Context, relation *Social) error {
 		return errors.New("already followed")
 	}
 
+	enqueued := false
+	if s.socialMQ != nil {
+		//异步执行关注
+		if err := s.socialMQ.Follow(ctx, relation.FollowerID, relation.VloggerID); err == nil {
+			log.Printf("follow request enqueued to rabbitmq: follower_id=%d vlogger_id=%d", relation.FollowerID, relation.VloggerID)
+			enqueued = true
+		}
+	}
+	if enqueued {
+		return nil
+	}
+
 	return s.repository.Follow(ctx, relation)
 }
 
@@ -55,6 +71,17 @@ func (s *Service) Unfollow(ctx context.Context, relation *Social) error {
 	}
 	if !isFollowed {
 		return errors.New("not followed")
+	}
+
+	enqueued := false
+	if s.socialMQ != nil {
+		if err := s.socialMQ.UnFollow(ctx, relation.FollowerID, relation.VloggerID); err == nil {
+			log.Printf("unfollow request enqueued to rabbitmq: follower_id=%d vlogger_id=%d", relation.FollowerID, relation.VloggerID)
+			enqueued = true
+		}
+	}
+	if enqueued {
+		return nil
 	}
 
 	return s.repository.Unfollow(ctx, relation)
