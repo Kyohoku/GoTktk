@@ -21,6 +21,10 @@ const (
 	likeExchange   = "like.events"
 	likeQueue      = "like.events"
 	likeBindingKey = "like.*"
+
+	commentExchange   = "comment.events"
+	commentQueue      = "comment.events"
+	commentBindingKey = "comment.*"
 )
 
 func main() {
@@ -72,15 +76,20 @@ func main() {
 	if err := declareLikeTopology(ch); err != nil {
 		log.Fatalf("Failed to declare like topology: %v", err)
 	}
+	//声明 Comment 交换机和队列
+	if err := declareCommentTopology(ch); err != nil {
+		log.Fatalf("Failed to declare comment topology: %v", err)
+	}
 
 	if err := ch.Qos(50, 0, false); err != nil {
 		log.Fatalf("Failed to set qos: %v", err)
 	}
 
 	videoRepo := video.NewVideoRepository(sqlDB)
+	commentRepo := video.NewCommentRepository(sqlDB)
 	likeRepo := video.NewLikeRepository(sqlDB)
 	likeWorker := worker.NewLikeWorker(ch, likeRepo, videoRepo, likeQueue)
-
+	commentWorker := worker.NewCommentWorker(ch, commentRepo, videoRepo, commentQueue)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -88,7 +97,8 @@ func main() {
 
 	log.Printf("Worker started, consuming queue=%s", likeQueue)
 	go func() { errCh <- likeWorker.Run(ctx) }()
-
+	log.Printf("Worker started, consuming queue=%s", commentQueue)
+	go func() { errCh <- commentWorker.Run(ctx) }()
 	err = <-errCh
 	if err != nil && err != context.Canceled {
 		log.Fatalf("Worker stopped: %v", err)
@@ -126,6 +136,40 @@ func declareLikeTopology(ch *amqp.Channel) error {
 		q.Name,
 		likeBindingKey,
 		likeExchange,
+		false,
+		nil,
+	)
+}
+
+func declareCommentTopology(ch *amqp.Channel) error {
+	if err := ch.ExchangeDeclare(
+		commentExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	q, err := ch.QueueDeclare(
+		commentQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	return ch.QueueBind(
+		q.Name,
+		commentBindingKey,
+		commentExchange,
 		false,
 		nil,
 	)

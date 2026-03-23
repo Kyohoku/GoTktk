@@ -77,7 +77,12 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *g
 
 	//comment
 	commentRepository := video.NewCommentRepository(db)
-	commentService := video.NewCommentService(commentRepository, videoRepository, cache)
+	commentMQ, err := rabbitmq.NewCommentMQ(rmq)
+	if err != nil {
+		log.Printf("CommentMQ init failed (mq disabled): %v", err)
+		commentMQ = nil
+	}
+	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
 	commentGroup := r.Group("/comment")
 	{
