@@ -16,10 +16,11 @@ type CommentService struct {
 	VideoRepository *VideoRepository
 	cache           *rediscache.Client
 	commentMQ       *rabbitmq.CommentMQ
+	popularityMQ    *rabbitmq.PopularityMQ
 }
 
-func NewCommentService(repo *CommentRepository, videoRepository *VideoRepository, cache *rediscache.Client, commentMQ *rabbitmq.CommentMQ) *CommentService {
-	return &CommentService{repo: repo, VideoRepository: videoRepository, cache: cache, commentMQ: commentMQ}
+func NewCommentService(repo *CommentRepository, videoRepository *VideoRepository, cache *rediscache.Client, commentMQ *rabbitmq.CommentMQ, popularityMQ *rabbitmq.PopularityMQ) *CommentService {
+	return &CommentService{repo: repo, VideoRepository: videoRepository, cache: cache, commentMQ: commentMQ, popularityMQ: popularityMQ}
 }
 
 func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
@@ -46,17 +47,31 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 	}
 
 	mysqlEnqueued := false
+	redisEnqueued := false
+
 	if s.commentMQ != nil {
 		if err := s.commentMQ.Publish(ctx, comment.Username, comment.VideoID, comment.AuthorID, comment.Content); err == nil {
 			log.Printf("comment request enqueued to rabbitmq: user_name=%v video_id=%d", comment.Username, comment.VideoID)
 			mysqlEnqueued = true
 		}
 	}
+
+	if s.popularityMQ != nil {
+		if err := s.popularityMQ.Update(ctx, comment.VideoID, 2); err == nil {
+			log.Printf("popularity update request enqueued to rabbitmq: video_id=%d", comment.VideoID)
+			redisEnqueued = true
+		}
+	}
+
+	// comment MQ 成功时，不再同步写评论表，避免重复创建评论
 	if mysqlEnqueued {
+		if !redisEnqueued {
+			UpdatePopularityCache(ctx, s.cache, comment.VideoID, 2)
+		}
 		return nil
 	}
 
-	// fallback: MQ 不可用时直接写数据库  直接写sql语句，确保评论和热度同步更新
+	// fallback: comment MQ 失败时，直接同步写 MySQL 和数据库热度
 	err = s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Select("id").First(&Video{}, comment.VideoID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -77,7 +92,11 @@ func (s *CommentService) Publish(ctx context.Context, comment *Comment) error {
 		return err
 	}
 
-	UpdatePopularityCache(ctx, s.cache, comment.VideoID, 2)
+	// fallback: popularity MQ 失败时，直接补 Redis 热度
+	if !redisEnqueued {
+		UpdatePopularityCache(ctx, s.cache, comment.VideoID, 2)
+	}
+
 	return nil
 }
 

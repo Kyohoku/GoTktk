@@ -30,6 +30,10 @@ const (
 	socialExchange   = "social.events"
 	socialQueue      = "social.events"
 	socialBindingKey = "social.*"
+
+	popularityExchange   = "video.popularity.events"
+	popularityQueue      = "video.popularity.events"
+	popularityBindingKey = "video.popularity.*"
 )
 
 func main() {
@@ -89,6 +93,12 @@ func main() {
 	if err := declareSocialTopology(ch); err != nil {
 		log.Fatalf("Failed to declare social topology: %v", err)
 	}
+	//声明 Popularity 交换机和队列
+	if cache != nil {
+		if err := declarePopularityTopology(ch); err != nil {
+			log.Fatalf("Failed to declare popularity topology: %v", err)
+		}
+	}
 
 	if err := ch.Qos(50, 0, false); err != nil {
 		log.Fatalf("Failed to set qos: %v", err)
@@ -101,6 +111,10 @@ func main() {
 	commentWorker := worker.NewCommentWorker(ch, commentRepo, videoRepo, commentQueue)
 	repo := social.NewSocialRepository(sqlDB)
 	socialWorker := worker.NewSocialWorker(ch, repo, socialQueue)
+	var popularityWorker *worker.PopularityWorker
+	if cache != nil {
+		popularityWorker = worker.NewPopularityWorker(ch, cache, popularityQueue)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -113,6 +127,11 @@ func main() {
 	go func() { errCh <- commentWorker.Run(ctx) }()
 	log.Printf("Worker started, consuming queue=%s", socialQueue)
 	go func() { errCh <- socialWorker.Run(ctx) }()
+	if popularityWorker != nil {
+		log.Printf("Worker started, consuming queue=%s", popularityQueue)
+		go func() { errCh <- popularityWorker.Run(ctx) }()
+	}
+
 	err = <-errCh
 	if err != nil && err != context.Canceled {
 		log.Fatalf("Worker stopped: %v", err)
@@ -224,4 +243,38 @@ func declareSocialTopology(ch *amqp.Channel) error {
 		return err
 	}
 	return nil
+}
+
+func declarePopularityTopology(ch *amqp.Channel) error {
+	if err := ch.ExchangeDeclare(
+		popularityExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	q, err := ch.QueueDeclare(
+		popularityQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	return ch.QueueBind(
+		q.Name,
+		popularityBindingKey,
+		popularityExchange,
+		false,
+		nil,
+	)
 }

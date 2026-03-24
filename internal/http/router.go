@@ -39,6 +39,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *g
 
 	//video
 	videoRepository := video.NewVideoRepository(db)
+	popularityMQ, err := rabbitmq.NewPopularityMQ(rmq)
 	videoService := video.NewVideoService(videoRepository, cache)
 	videoHandler := video.NewVideoHandler(videoService, accountService)
 	videoGroup := r.Group("/video")
@@ -63,7 +64,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *g
 		likeMQ = nil
 	}
 	likeRepository := video.NewLikeRepository(db)
-	likeService := video.NewLikeService(likeRepository, videoRepository, cache, likeMQ)
+	likeService := video.NewLikeService(likeRepository, videoRepository, cache, likeMQ, popularityMQ)
 	likeHandler := video.NewLikeHandler(likeService)
 	likeGroup := r.Group("/like")
 	protectedLikeGroup := likeGroup.Group("")
@@ -82,7 +83,7 @@ func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *g
 		log.Printf("CommentMQ init failed (mq disabled): %v", err)
 		commentMQ = nil
 	}
-	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ)
+	commentService := video.NewCommentService(commentRepository, videoRepository, cache, commentMQ, popularityMQ)
 	commentHandler := video.NewCommentHandler(commentService, accountService)
 	commentGroup := r.Group("/comment")
 	{

@@ -13,14 +13,15 @@ import (
 )
 
 type LikeService struct {
-	repo      *LikeRepository
-	VideoRepo *VideoRepository
-	cache     *rediscache.Client
-	likeMQ    *rabbitmq.LikeMQ
+	repo         *LikeRepository
+	VideoRepo    *VideoRepository
+	cache        *rediscache.Client
+	likeMQ       *rabbitmq.LikeMQ
+	popularityMQ *rabbitmq.PopularityMQ
 }
 
-func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *rediscache.Client, likeMQ *rabbitmq.LikeMQ) *LikeService {
-	return &LikeService{repo: repo, VideoRepo: videoRepo, cache: cache, likeMQ: likeMQ}
+func NewLikeService(repo *LikeRepository, videoRepo *VideoRepository, cache *rediscache.Client, likeMQ *rabbitmq.LikeMQ, popularityMQ *rabbitmq.PopularityMQ) *LikeService {
+	return &LikeService{repo: repo, VideoRepo: videoRepo, cache: cache, likeMQ: likeMQ, popularityMQ: popularityMQ}
 }
 
 func isDupKey(err error) bool {
@@ -53,48 +54,68 @@ func (s *LikeService) Like(ctx context.Context, like *Like) error {
 	}
 
 	like.CreatedAt = time.Now()
+
 	mysqlEnqueued := false
+	redisEnqueued := false
+
 	if s.likeMQ != nil {
-		if err := s.likeMQ.Like(ctx, like.AccountID, like.VideoID); err == nil { //成功异步执行
+		if err := s.likeMQ.Like(ctx, like.AccountID, like.VideoID); err == nil {
 			log.Printf("like request enqueued to rabbitmq: user_id=%d video_id=%d", like.AccountID, like.VideoID)
 			mysqlEnqueued = true
 		}
 	}
-	if mysqlEnqueued {
-		return nil
-	}
 
-	// 回退，mq挂了的话直接写数据库
-	if !mysqlEnqueued {
-		log.Printf("like mq publish failed, fallback to db")
-		err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Select("id").First(&Video{}, like.VideoID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errors.New("video not found")
-				}
-				return err
-			}
-			if err := tx.Create(like).Error; err != nil {
-				if isDupKey(err) {
-					return errors.New("user has liked this video")
-				}
-				return err
-			}
-			if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("likes_count", gorm.Expr("likes_count + 1")).Error; err != nil {
-				return err
-			}
-			return tx.Model(&Video{}).Where("id = ?", like.VideoID).
-				UpdateColumn("popularity", gorm.Expr("popularity + 1")).Error
-		})
-		if err != nil {
-			return err
+	if s.popularityMQ != nil {
+		if err := s.popularityMQ.Update(ctx, like.VideoID, 1); err == nil {
+			log.Printf("popularity update request enqueued to rabbitmq: video_id=%d", like.VideoID)
+			redisEnqueued = true
 		}
 	}
 
-	// 直接写缓存的热度
+	// like MQ 成功时，不再同步写 like 表，避免重复点赞
+	if mysqlEnqueued {
+		if !redisEnqueued {
+			UpdatePopularityCache(ctx, s.cache, like.VideoID, 1)
+		}
+		return nil
+	}
 
-	UpdatePopularityCache(ctx, s.cache, like.VideoID, 1)
+	log.Printf("like mq publish failed, fallback to db")
+
+	// fallback: like MQ 失败时，同步写 MySQL 和数据库热度
+	err = s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select("id").First(&Video{}, like.VideoID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("video not found")
+			}
+			return err
+		}
+
+		if err := tx.Create(like).Error; err != nil {
+			if isDupKey(err) {
+				return errors.New("user has liked this video")
+			}
+			return err
+		}
+
+		if err := tx.Model(&Video{}).
+			Where("id = ?", like.VideoID).
+			UpdateColumn("likes_count", gorm.Expr("likes_count + 1")).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&Video{}).
+			Where("id = ?", like.VideoID).
+			UpdateColumn("popularity", gorm.Expr("popularity + 1")).Error
+	})
+	if err != nil {
+		return err
+	}
+
+	// fallback: popularity MQ 失败时，补 Redis 热度
+	if !redisEnqueued {
+		UpdatePopularityCache(ctx, s.cache, like.VideoID, 1)
+	}
 
 	return nil
 }
@@ -124,16 +145,33 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 	}
 
 	mysqlEnqueued := false
+	redisEnqueued := false
+
 	if s.likeMQ != nil {
 		if err := s.likeMQ.Unlike(ctx, like.AccountID, like.VideoID); err == nil {
+			log.Printf("unlike request enqueued to rabbitmq: user_id=%d video_id=%d", like.AccountID, like.VideoID)
 			mysqlEnqueued = true
 		}
 	}
+
+	if s.popularityMQ != nil {
+		if err := s.popularityMQ.Update(ctx, like.VideoID, -1); err == nil {
+			log.Printf("popularity update request enqueued to rabbitmq: video_id=%d", like.VideoID)
+			redisEnqueued = true
+		}
+	}
+
+	// like MQ 成功时，不再同步删 like 表，避免重复扣减
 	if mysqlEnqueued {
+		if !redisEnqueued {
+			UpdatePopularityCache(ctx, s.cache, like.VideoID, -1)
+		}
 		return nil
 	}
 
-	// fallback: MQ 不可用时直接写数据库
+	log.Printf("unlike mq publish failed, fallback to db")
+
+	// fallback: like MQ 失败时，同步写 MySQL 和数据库热度
 	err = s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		del := tx.Where("video_id = ? AND account_id = ?", like.VideoID, like.AccountID).Delete(&Like{})
 		if del.Error != nil {
@@ -143,19 +181,25 @@ func (s *LikeService) Unlike(ctx context.Context, like *Like) error {
 			return errors.New("user has not liked this video")
 		}
 
-		if err := tx.Model(&Video{}).Where("id = ?", like.VideoID).
+		if err := tx.Model(&Video{}).
+			Where("id = ?", like.VideoID).
 			UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
 			return err
 		}
 
-		return tx.Model(&Video{}).Where("id = ?", like.VideoID).
+		return tx.Model(&Video{}).
+			Where("id = ?", like.VideoID).
 			UpdateColumn("popularity", gorm.Expr("GREATEST(popularity - 1, 0)")).Error
 	})
 	if err != nil {
 		return err
 	}
 
-	UpdatePopularityCache(ctx, s.cache, like.VideoID, -1)
+	// fallback: popularity MQ 失败时，补 Redis 热度
+	if !redisEnqueued {
+		UpdatePopularityCache(ctx, s.cache, like.VideoID, -1)
+	}
+
 	return nil
 }
 
