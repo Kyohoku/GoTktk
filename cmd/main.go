@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"gotik/internal/ai"
 	"gotik/internal/config"
 	"gotik/internal/db"
 	apphttp "gotik/internal/http"
@@ -62,8 +63,17 @@ func main() {
 		log.Printf("RabbitMQ connected")
 	}
 
+	// 连接 AI Service（用于视频问答、总结、评论建议）
+	aiClient, err := ai.NewHTTPClient(&cfg.AI)
+	if err != nil {
+		log.Printf("AI client init failed (disabled): %v", err)
+		aiClient = nil
+	} else {
+		log.Printf("AI client initialized")
+	}
+
 	//设置路由
-	r := apphttp.SetRouter(sqlDB, cache, rmq)
+	r := apphttp.SetRouter(sqlDB, cache, rmq, aiClient)
 	log.Printf("server is running on port %d", cfg.Server.Port)
 	if err := r.Run(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
 		log.Fatalf("failed to run server: %v", err)

@@ -11,6 +11,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
 	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
+	AI       AIConfig       `yaml:"ai"`
 }
 
 type ServerConfig struct {
@@ -37,6 +38,12 @@ type RabbitMQConfig struct {
 	Port     int    `yaml:"port"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+type AIConfig struct {
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`
+	TimeoutSec int    `yaml:"timeout_sec"`
 }
 
 func Load(filename string) (Config, error) {

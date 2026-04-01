@@ -2,6 +2,7 @@ package http
 
 import (
 	"gotik/internal/account"
+	"gotik/internal/ai"
 	"gotik/internal/feed"
 	jwtmiddleware "gotik/internal/middleware/jwt"
 	"gotik/internal/middleware/rabbitmq"
@@ -14,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ) *gin.Engine {
+func SetRouter(db *gorm.DB, cache *rediscache.Client, rmq *rabbitmq.RabbitMQ, aiClient *ai.HTTPClient) *gin.Engine {
 	r := gin.Default()
 	r.Static("/static", "./.run/uploads")
 

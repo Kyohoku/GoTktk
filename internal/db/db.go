@@ -5,6 +5,7 @@ package db
 import (
 	"fmt"
 	"gotik/internal/account"
+	"gotik/internal/ai"
 	"gotik/internal/config"
 	"gotik/internal/social"
 	"gotik/internal/video"
@@ -42,7 +43,7 @@ func NewDB(dbcfg config.DatabaseConfig) (*gorm.DB, error) {
 
 // 自动迁移表
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&account.Account{}, &video.Video{}, &video.Like{}, &video.Comment{}, &social.Social{})
+	return db.AutoMigrate(&account.Account{}, &video.Video{}, &video.Like{}, &video.Comment{}, &social.Social{}, &ai.VideoSummary{}, &ai.CommentSuggestion{}, &ai.QAHistory{})
 }
 
 // 关闭数据库连接
