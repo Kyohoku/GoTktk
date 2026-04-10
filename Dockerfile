@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/api ./cmd
+RUN go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/
 RUN go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 FROM alpine:3.20 AS base
@@ -25,7 +25,12 @@ RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -s /sbin/nologin 
 WORKDIR /app
 
 COPY --from=build /src/configs ./configs
-RUN mkdir -p ./.run/uploads/videos ./.run/uploads/covers && chown -R app:app /app
+RUN mkdir -p \
+    ./.run/uploads/videos \
+    ./.run/uploads/covers \
+    ./logs/app \
+    ./logs/worker \
+    && chown -R app:app /app
 
 USER app
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"gotik/internal/logger"
 	"log"
 	"strconv"
 	"time"
@@ -15,6 +16,18 @@ import (
 )
 
 func main() {
+	logInit, err := logger.Init(logger.ServiceApp)
+	if err != nil {
+		log.Fatalf("failed to init logger: %v", err)
+	}
+	defer func() {
+		if err := logInit.LogFile.Close(); err != nil {
+			log.Printf("failed to close log file: %v", err)
+		}
+	}()
+
+	log.Printf("logger initialized, log path=%s", logInit.LogPath)
+
 	cfg, err := config.Load("configs/config.yaml")
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"gotik/internal/config"
 	"gotik/internal/db"
+	"gotik/internal/logger"
 	rediscache "gotik/internal/middleware/redis"
 	"gotik/internal/social"
 	"gotik/internal/video"
@@ -37,6 +38,19 @@ const (
 )
 
 func main() {
+
+	logInit, err := logger.Init(logger.ServiceWorker)
+	if err != nil {
+		log.Fatalf("failed to init logger: %v", err)
+	}
+	defer func() {
+		if err := logInit.LogFile.Close(); err != nil {
+			log.Printf("failed to close log file: %v", err)
+		}
+	}()
+
+	log.Printf("logger initialized, log path=%s", logInit.LogPath)
+
 	// 加载配置
 	log.Printf("Loading config from configs/config.yaml")
 	cfg, err := config.Load("configs/config.yaml")

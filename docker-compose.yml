@@ -22,7 +22,13 @@ services:
     image: redis:7-alpine
     container_name: gotik-redis
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "pass4Redis"]
+    command:
+      [
+        "redis-server",
+        "--requirepass", "pass4Redis",
+        "--appendonly", "yes",
+        "--appendfsync", "everysec"
+      ]
     ports:
       - "6380:6379"
     volumes:
@@ -72,6 +78,7 @@ services:
     volumes:
       - ./configs/config.docker.yaml:/app/configs/config.yaml:ro
       - uploads_data:/app/.run/uploads
+      - ./logs:/app/logs
 
   worker:
     build:
@@ -90,6 +97,7 @@ services:
     volumes:
       - ./configs/config.docker.yaml:/app/configs/config.yaml:ro
       - uploads_data:/app/.run/uploads
+      - ./logs:/app/logs
 
 volumes:
   mysql_data:

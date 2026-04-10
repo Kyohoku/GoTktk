@@ -57,9 +57,11 @@ func (vs *VideoService) ListByAuthorID(ctx context.Context, authorID uint) ([]Vi
 }
 
 func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) {
+	log.Printf("INFO video_detail request received: video_id=%d", id)
+
 	cacheKey := fmt.Sprintf("video:detail:id=%d", id)
 
-	//定义 get、set  缓存函数
+	// 定义 get、set 缓存函数
 	getCached := func() (*Video, bool) {
 		if vs.cache == nil {
 			return nil, false
@@ -67,11 +69,15 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 
 		b, err := vs.cache.GetBytes(ctx, cacheKey)
 		if err != nil {
+			if !rediscache.IsMiss(err) {
+				log.Printf("ERROR video_detail cache read failed: video_id=%d key=%s err=%v", id, cacheKey, err)
+			}
 			return nil, false
 		}
 
 		var cached Video
 		if err := json.Unmarshal(b, &cached); err != nil {
+			log.Printf("ERROR video_detail cache unmarshal failed: video_id=%d key=%s err=%v", id, cacheKey, err)
 			return nil, false
 		}
 
@@ -85,19 +91,25 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 
 		b, err := json.Marshal(video)
 		if err != nil {
+			log.Printf("ERROR video_detail cache marshal failed: video_id=%d key=%s err=%v", id, cacheKey, err)
 			return
 		}
 
-		_ = vs.cache.SetBytes(ctx, cacheKey, b, vs.cacheTTL)
+		if err := vs.cache.SetBytes(ctx, cacheKey, b, vs.cacheTTL); err != nil {
+			log.Printf("ERROR video_detail cache write failed: video_id=%d key=%s err=%v", id, cacheKey, err)
+			return
+		}
+
+		log.Printf("INFO video_detail cache_write success: video_id=%d key=%s ttl=%s", id, cacheKey, vs.cacheTTL)
 	}
 
-	if vs.cache != nil { //redis 运行中
-		if v, ok := getCached(); ok { //缓存命中
-			log.Printf("video detail cache hit: key=%s", cacheKey)
+	if vs.cache != nil { // redis 可用
+		if v, ok := getCached(); ok { // 缓存命中
+			log.Printf("INFO video_detail cache_result=hit video_id=%d key=%s", id, cacheKey)
 			return v, nil
 		}
 
-		log.Printf("video detail cache miss: key=%s", cacheKey)
+		log.Printf("INFO video_detail cache_result=miss video_id=%d key=%s", id, cacheKey)
 
 		opCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		b, err := vs.cache.GetBytes(opCtx, cacheKey)
@@ -105,55 +117,79 @@ func (vs *VideoService) GetDetail(ctx context.Context, id uint) (*Video, error) 
 		if err == nil {
 			var cached Video
 			if err := json.Unmarshal(b, &cached); err == nil {
+				log.Printf("INFO video_detail cache_result=hit_after_recheck video_id=%d key=%s", id, cacheKey)
 				return &cached, nil
 			}
-		} else if rediscache.IsMiss(err) { //缓存 miss
-			lockKey := "lock:" + cacheKey //lock key 设计
+			log.Printf("ERROR video_detail cache recheck unmarshal failed: video_id=%d key=%s err=%v", id, cacheKey, err)
+		} else if rediscache.IsMiss(err) { // 缓存 miss
+			lockKey := "lock:" + cacheKey // lock key 设计
 
 			lockCtx, lockCancel := context.WithTimeout(ctx, 50*time.Millisecond)
-			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 2*time.Second) //锁2秒有效
+			token, locked, lockErr := vs.cache.Lock(lockCtx, lockKey, 2*time.Second) // 锁 2 秒有效
 			lockCancel()
 
+			if lockErr != nil {
+				log.Printf("ERROR video_detail lock failed: video_id=%d lock_key=%s err=%v", id, lockKey, lockErr)
+			}
+
 			if lockErr == nil && locked {
-				//defer 保证锁可以被释放
-				defer func() { _ = vs.cache.Unlock(context.Background(), lockKey, token) }()
+				// defer 保证锁可以被释放
+				defer func() {
+					if err := vs.cache.Unlock(context.Background(), lockKey, token); err != nil {
+						log.Printf("ERROR video_detail unlock failed: video_id=%d lock_key=%s err=%v", id, lockKey, err)
+					}
+				}()
 
-				log.Printf("video detail lock acquired: lockKey=%s token_prefix=%s", lockKey, token[:8])
+				log.Printf("INFO video_detail lock acquired: video_id=%d lock_key=%s token_prefix=%s", id, lockKey, token[:8])
 
-				if v, ok := getCached(); ok { //拿到锁后再先查一次缓存
-					log.Printf("video detail cache filled before db fallback: key=%s", cacheKey) //拿到锁后发现缓存已经被填写了
-
+				if v, ok := getCached(); ok { // 拿到锁后再先查一次缓存
+					log.Printf("INFO video_detail cache_result=filled_after_lock video_id=%d key=%s", id, cacheKey)
 					return v, nil
 				}
 
+				log.Printf("INFO video_detail db_fallback start: video_id=%d", id)
 				video, err := vs.repo.GetByID(ctx, id)
 				if err != nil {
+					log.Printf("ERROR video_detail db_fallback failed: video_id=%d err=%v", id, err)
 					return nil, err
 				}
 				setCached(video)
 				return video, nil
 			}
 
+			if lockErr == nil && !locked {
+				log.Printf("INFO video_detail lock skipped_wait_cache_fill: video_id=%d lock_key=%s", id, lockKey)
+			}
+
 			// 没拿到锁：等待别人回填缓存
-			for i := 0; i < 5; i++ { //等待100ms
+			for i := 0; i < 5; i++ { // 等待 100ms
 				select {
 				case <-ctx.Done():
+					log.Printf("ERROR video_detail context canceled while waiting cache fill: video_id=%d err=%v", id, ctx.Err())
 					return nil, ctx.Err()
 				case <-time.After(20 * time.Millisecond):
 				}
 				if v, ok := getCached(); ok {
+					log.Printf("INFO video_detail cache_result=hit_after_wait video_id=%d key=%s retry=%d", id, cacheKey, i+1)
 					return v, nil
 				}
 			}
+
+			log.Printf("INFO video_detail wait_cache_fill_timeout_fallback_db: video_id=%d key=%s", id, cacheKey)
+		} else {
+			log.Printf("ERROR video_detail cache recheck failed: video_id=%d key=%s err=%v", id, cacheKey, err)
 		}
 	}
-	//查数据库兜底
+
+	// 查数据库兜底
+	log.Printf("INFO video_detail db_fallback start: video_id=%d", id)
 	video, err := vs.repo.GetByID(ctx, id)
 	if err != nil {
+		log.Printf("ERROR video_detail db_fallback failed: video_id=%d err=%v", id, err)
 		return nil, err
 	}
 	if vs.cache != nil {
-		setCached(video) //回填 redis
+		setCached(video) // 回填 redis
 	}
 	return video, nil
 }
