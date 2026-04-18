@@ -11,6 +11,9 @@ ARG GO_VERSION=1.25.6
 FROM golang:${GO_VERSION} AS build
 WORKDIR /src
 
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
+
 COPY go.mod go.sum ./
 RUN go mod download
 

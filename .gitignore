@@ -1,0 +1,8 @@
+logs/
+
+.run/uploads/
+
+node_modules/
+
+
+.idea/

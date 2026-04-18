@@ -19,3 +19,8 @@ rabbitmq:
   port: 5672
   username: guest
   password: guest
+
+ai:
+  host: localhost
+  port: 9000
+  timeout_sec: 30
