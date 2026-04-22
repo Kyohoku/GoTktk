@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+database:
+  host: host.docker.internal
+  port: 3307
+  user: root
+  password: 123456
+  dbname: feedsystem
+
+redis:
+  host: host.docker.internal
+  port: 6380
+  password: pass4Redis
+  db: 0
+
+rabbitmq:
+  host: host.docker.internal
+  port: 5673
+  username: guest
+  password: guest
+
+ai:
+  host: host.docker.internal
+  port: 9000
+  timeout_sec: 30

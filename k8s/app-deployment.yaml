@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotik-app
+  namespace: gotik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gotik-app
+  template:
+    metadata:
+      labels:
+        app: gotik-app
+    spec:
+      containers:
+        - name: gotik-app
+          image: gotik-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/configs/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: app-config
+          configMap:
+            name: gotik-app-config
